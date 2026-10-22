@@ -1,2 +1,604 @@
 # Dino-Run
 A cute dino game to play to pass the time. Try to dodge the various obstacles, such as cacti and flying birds!
+[cute_dino_run.html](https://github.com/user-attachments/files/33795411/cute_dino_run.html)
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Cute Dino Run</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@700;900&display=swap" rel="stylesheet">
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            background-color: #FFF5EE; /* Seashell pastel background */
+            overflow: hidden;
+            font-family: 'Nunito', sans-serif;
+            touch-action: none;
+        }
+        
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        #start-screen, #game-over-screen {
+            pointer-events: auto;
+            text-align: center;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 2.5rem;
+            border: 4px solid #FFB6C1;
+            border-radius: 30px;
+            box-shadow: 0 10px 25px rgba(255, 182, 193, 0.4);
+        }
+
+        .cute-text {
+            color: #FF69B4;
+            text-shadow: 2px 2px 0px #FFF, 4px 4px 0px #FFB6C1;
+            letter-spacing: 2px;
+        }
+
+        button {
+            margin-top: 20px;
+            padding: 12px 35px;
+            font-size: 20px;
+            font-weight: 900;
+            color: white;
+            background-color: #87CEEB; /* Sky blue */
+            border: 4px solid #5F9EA0;
+            border-radius: 25px;
+            cursor: pointer;
+            font-family: 'Nunito', sans-serif;
+            box-shadow: 0 6px 0 #5F9EA0;
+            transition: all 0.1s;
+        }
+
+        button:active {
+            transform: translateY(6px);
+            box-shadow: 0 0 0 #5F9EA0;
+        }
+
+        #score-display {
+            position: absolute;
+            top: 30px;
+            right: 40px;
+            font-size: 32px;
+            font-weight: 900;
+            color: #FF69B4;
+            text-shadow: 2px 2px 0px #FFF;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas"></canvas>
+    
+    <div id="score-display">00000</div>
+
+    <div id="ui-layer">
+        <div id="start-screen">
+            <h1 class="text-4xl md:text-6xl mb-2 font-black cute-text">CUTE DINO</h1>
+            <h2 class="text-2xl md:text-4xl mb-4 font-bold text-sky-400">RUN!</h2>
+            <p class="text-lg text-gray-500 mb-6 font-bold">Tap or Spacebar to jump over<br>the happy little cacti!</p>
+            <button id="start-btn">PLAY!</button>
+        </div>
+
+        <div id="game-over-screen" class="hidden">
+            <h1 class="text-4xl md:text-5xl mb-4 font-black cute-text">Oh no!</h1>
+            <p class="text-xl text-gray-600 mb-6 font-bold">You hugged a cactus.<br>Score: <span id="final-score" class="text-sky-500">0</span></p>
+            <button id="restart-btn">TRY AGAIN</button>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        const startScreen = document.getElementById('start-screen');
+        const gameOverScreen = document.getElementById('game-over-screen');
+        const scoreDisplay = document.getElementById('score-display');
+        const finalScoreDisplay = document.getElementById('final-score');
+        const startBtn = document.getElementById('start-btn');
+        const restartBtn = document.getElementById('restart-btn');
+
+        let width, height;
+        let gameActive = false;
+        let score = 0;
+        let frameCount = 0;
+        let groundLevel;
+        let gameSpeed = 5;
+        let clouds = [];
+
+        function resize() {
+            width = window.innerWidth;
+            height = window.innerHeight;
+            canvas.width = width;
+            canvas.height = height;
+            // Ground is roughly bottom 25%
+            groundLevel = height - Math.max(150, height * 0.25);
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+        // Utility for padded score
+        function padScore(score) {
+            return score.toString().padStart(5, '0');
+        }
+
+        const player = {
+            x: width * 0.1, // 10% from left
+            y: 0,
+            width: 44,
+            height: 48,
+            vy: 0,
+            gravity: 0.6,
+            jumpStrength: -12,
+            grounded: false,
+            
+            draw(isDead = false) {
+                ctx.save();
+                
+                let currentY = this.y;
+
+                // T-Rex Body (Sky Blue) - Pixel Art Style matching the image
+                ctx.fillStyle = '#87CEEB';
+                const pixelSize = 2;
+                
+                const bodyPixels = [
+                    "             111111111",
+                    "             111111111",
+                    "             111111111",
+                    "             111      ",
+                    "             111111111",
+                    "             1111111  ",
+                    "             1111     ",
+                    "1            1111     ",
+                    "11          11111     ",
+                    "111         111111  11",
+                    "1111       1111111  11",
+                    "11111     11111111    ",
+                    "111111   111111111    ",
+                    "111111111111111111    ",
+                    " 11111111111111111    ",
+                    "  1111111111111111    ",
+                    "   111111111111111    ",
+                    "    1111111111111     ",
+                    "      1111111111      ",
+                    "       11111111       "
+                ];
+
+                ctx.beginPath();
+                for (let r = 0; r < bodyPixels.length; r++) {
+                    for (let c = 0; c < bodyPixels[r].length; c++) {
+                        if (bodyPixels[r][c] === '1') {
+                            ctx.rect(this.x + c * pixelSize, currentY + r * pixelSize, pixelSize, pixelSize);
+                        }
+                    }
+                }
+                ctx.fill();
+
+                if (isDead) {
+                    // Shocked Face (X eye)
+                    ctx.strokeStyle = '#333';
+                    ctx.lineWidth = 2;
+                    ctx.beginPath(); ctx.moveTo(this.x + 14*pixelSize, currentY + 1*pixelSize); ctx.lineTo(this.x + 17*pixelSize, currentY + 4*pixelSize); ctx.stroke();
+                    ctx.beginPath(); ctx.moveTo(this.x + 17*pixelSize, currentY + 1*pixelSize); ctx.lineTo(this.x + 14*pixelSize, currentY + 4*pixelSize); ctx.stroke();
+                    
+                    // Open mouth
+                    ctx.fillStyle = '#FF69B4';
+                    ctx.beginPath();
+                    ctx.arc(this.x + 18 * pixelSize, currentY + 7 * pixelSize, 3, 0, Math.PI*2);
+                    ctx.fill();
+                } else {
+                    // Eye (Cute big eye)
+                    ctx.fillStyle = '#333';
+                    ctx.beginPath();
+                    ctx.arc(this.x + 15 * pixelSize, currentY + 2.5 * pixelSize, 2.5, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.fillStyle = '#FFF';
+                    ctx.beginPath();
+                    ctx.arc(this.x + 15.5 * pixelSize, currentY + 2 * pixelSize, 1, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+
+                // Legs
+                ctx.fillStyle = '#87CEEB';
+                let legOffset1 = (this.grounded && frameCount % 12 < 6) ? -3 : 0;
+                let legOffset2 = (this.grounded && frameCount % 12 >= 6) ? -3 : 0;
+                if (!this.grounded || isDead) { legOffset1 = 0; legOffset2 = 0; } 
+                
+                // left leg
+                ctx.fillRect(this.x + 7 * pixelSize, currentY + 20 * pixelSize + legOffset1, pixelSize * 2, pixelSize * 3);
+                ctx.fillRect(this.x + 7 * pixelSize, currentY + 23 * pixelSize + legOffset1, pixelSize * 3, pixelSize);
+                
+                // right leg
+                ctx.fillRect(this.x + 12 * pixelSize, currentY + 20 * pixelSize + legOffset2, pixelSize * 2, pixelSize * 3);
+                ctx.fillRect(this.x + 12 * pixelSize, currentY + 23 * pixelSize + legOffset2, pixelSize * 3, pixelSize);
+
+                // Cute Pink Bow
+                ctx.fillStyle = '#FF69B4'; 
+                let bx = this.x + 13 * pixelSize;
+                let by = currentY - 2;
+                
+                ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(bx - 8, by - 6); ctx.lineTo(bx - 8, by + 4); ctx.fill();
+                ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(bx + 8, by - 6); ctx.lineTo(bx + 8, by + 4); ctx.fill();
+                ctx.beginPath(); ctx.arc(bx, by, 3, 0, Math.PI * 2); ctx.fill();
+
+                ctx.restore();
+            },
+            
+            update() {
+                this.y += this.vy;
+                this.vy += this.gravity;
+
+                // Floor collision
+                if (this.y + this.height >= groundLevel) {
+                    this.y = groundLevel - this.height;
+                    this.vy = 0;
+                    this.grounded = true;
+                } else {
+                    this.grounded = false;
+                }
+            },
+            
+            jump() {
+                if (this.grounded) {
+                    this.vy = this.jumpStrength;
+                }
+            }
+        };
+
+        let obstacles = [];
+        
+        class Cactus {
+            constructor() {
+                this.width = 30;
+                // Random height between 40 and 70
+                this.height = 40 + Math.random() * 30; 
+                this.x = width;
+                this.y = groundLevel - this.height;
+                this.passed = false;
+                
+                // Randomly decide if it has arms
+                this.hasArms = Math.random() > 0.3;
+                this.wobbleOffset = Math.random() * Math.PI; // For slight bouncing/wobbling
+            }
+            
+            draw() {
+                ctx.save();
+                
+                let wobbleY = Math.sin(frameCount * 0.1 + this.wobbleOffset) * 2;
+                let drawY = this.y + wobbleY;
+
+                ctx.fillStyle = '#98FB98'; // Pale Green
+                
+                // Main stem
+                ctx.beginPath();
+                ctx.roundRect(this.x, drawY, this.width, this.height + 10, 15);
+                ctx.fill();
+
+                // Arms
+                if (this.hasArms) {
+                    // Left arm
+                    ctx.beginPath();
+                    ctx.roundRect(this.x - 12, drawY + 15, 15, 12, 6);
+                    ctx.roundRect(this.x - 12, drawY + 5, 12, 15, 6);
+                    ctx.fill();
+                    
+                    // Right arm
+                    ctx.beginPath();
+                    ctx.roundRect(this.x + this.width - 3, drawY + 25, 15, 12, 6);
+                    ctx.roundRect(this.x + this.width, drawY + 10, 12, 20, 6);
+                    ctx.fill();
+                }
+
+                // Cute Face
+                // Eyes
+                ctx.fillStyle = '#333';
+                ctx.beginPath();
+                ctx.arc(this.x + this.width/2 - 6, drawY + 16, 2.5, 0, Math.PI*2);
+                ctx.arc(this.x + this.width/2 + 6, drawY + 16, 2.5, 0, Math.PI*2);
+                ctx.fill();
+                
+                // Blush
+                ctx.fillStyle = '#FFB6C1';
+                ctx.beginPath();
+                ctx.arc(this.x + this.width/2 - 11, drawY + 20, 3.5, 0, Math.PI*2);
+                ctx.arc(this.x + this.width/2 + 11, drawY + 20, 3.5, 0, Math.PI*2);
+                ctx.fill();
+                
+                // Smile
+                ctx.strokeStyle = '#333';
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                ctx.arc(this.x + this.width/2, drawY + 18, 4, 0, Math.PI);
+                ctx.stroke();
+
+                // Little flower on top occasionally
+                if (this.height > 55) {
+                    ctx.fillStyle = '#FFD700'; // Yellow
+                    ctx.beginPath();
+                    ctx.arc(this.x + this.width/2, drawY - 2, 4, 0, Math.PI*2);
+                    ctx.fill();
+                    ctx.fillStyle = '#FFF';
+                    for(let i=0; i<4; i++) {
+                        let angle = (i * Math.PI) / 2;
+                        ctx.beginPath();
+                        ctx.arc(this.x + this.width/2 + Math.cos(angle)*5, drawY - 2 + Math.sin(angle)*5, 3, 0, Math.PI*2);
+                        ctx.fill();
+                    }
+                }
+
+                ctx.restore();
+            }
+            
+            update() {
+                this.x -= gameSpeed;
+            }
+        }
+
+        class Bird {
+            constructor() {
+                this.width = 40;
+                this.height = 30;
+                this.x = width;
+                // High enough to run under, or low enough to jump over
+                this.y = groundLevel - 40 - Math.random() * 60; 
+                this.passed = false;
+            }
+            
+            draw() {
+                ctx.save();
+                ctx.fillStyle = '#FFA07A'; // Light salmon/orange bird
+                
+                // Bobbing flight pattern
+                let flyY = this.y + Math.sin(frameCount * 0.1) * 10;
+                
+                // Body
+                ctx.beginPath();
+                ctx.ellipse(this.x + 20, flyY + 15, 20, 10, 0, 0, Math.PI*2);
+                ctx.fill();
+                
+                // Wings flapping
+                ctx.fillStyle = '#FF7F50';
+                let wingFlap = Math.sin(frameCount * 0.3) * 15;
+                ctx.beginPath();
+                ctx.moveTo(this.x + 20, flyY + 10);
+                ctx.lineTo(this.x + 30, flyY - wingFlap);
+                ctx.lineTo(this.x + 10, flyY - wingFlap);
+                ctx.fill();
+                
+                // Beak
+                ctx.fillStyle = '#FFD700';
+                ctx.beginPath();
+                ctx.moveTo(this.x, flyY + 15);
+                ctx.lineTo(this.x - 10, flyY + 18);
+                ctx.lineTo(this.x, flyY + 21);
+                ctx.fill();
+                
+                // Eye
+                ctx.fillStyle = '#333';
+                ctx.beginPath();
+                ctx.arc(this.x + 8, flyY + 12, 2, 0, Math.PI*2);
+                ctx.fill();
+
+                ctx.restore();
+            }
+            
+            update() {
+                this.x -= (gameSpeed + 1); // Birds fly slightly faster than the ground
+            }
+        }
+
+        class Cloud {
+            constructor() {
+                this.x = width + Math.random() * 200;
+                this.y = Math.random() * (groundLevel - 150) + 20;
+                this.speed = Math.random() * 1 + 0.5;
+                this.scale = Math.random() * 0.5 + 0.5;
+            }
+            
+            draw() {
+                ctx.save();
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, 25 * this.scale, 0, Math.PI * 2);
+                ctx.arc(this.x + 20 * this.scale, this.y - 10 * this.scale, 30 * this.scale, 0, Math.PI * 2);
+                ctx.arc(this.x + 45 * this.scale, this.y, 25 * this.scale, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            }
+            
+            update() {
+                this.x -= this.speed * (gameSpeed / 5); // Scale speed slightly with game
+            }
+        }
+
+        function initClouds() {
+            clouds = [];
+            for(let i=0; i<5; i++) {
+                let c = new Cloud();
+                c.x = Math.random() * width; // distribute initially
+                clouds.push(c);
+            }
+        }
+
+        function drawEnvironment() {
+            // Background color is handled by CSS, we just clear
+            ctx.clearRect(0, 0, width, height);
+            
+            // Draw clouds
+            clouds.forEach(c => c.draw());
+
+            // Draw Ground (Thick pastel line)
+            ctx.fillStyle = '#FFB6C1'; // Light pink ground
+            ctx.fillRect(0, groundLevel, width, height - groundLevel);
+            
+            // Draw little grass patches moving
+            ctx.fillStyle = '#FF9AA2';
+            let offset = (frameCount * gameSpeed) % 100;
+            for(let i = -offset; i < width; i += 100) {
+                ctx.beginPath();
+                ctx.roundRect(i, groundLevel + 10, 20, 5, 2);
+                ctx.fill();
+                ctx.beginPath();
+                ctx.roundRect(i + 40, groundLevel + 25, 15, 5, 2);
+                ctx.fill();
+            }
+        }
+
+        function checkCollision(rect1, rect2) {
+            // Generous collision box to avoid frustrating deaths
+            const paddingX = 8;
+            const paddingY = 8;
+            return (
+                rect1.x + paddingX < rect2.x + rect2.width &&
+                rect1.x + rect1.width - paddingX > rect2.x &&
+                rect1.y + paddingY < rect2.y + rect2.height &&
+                rect1.y + rect1.height > rect2.y + paddingY
+            );
+        }
+
+        function initGame() {
+            player.y = groundLevel - player.height;
+            player.vy = 0;
+            obstacles = [];
+            initClouds();
+            score = 0;
+            gameSpeed = 5;
+            frameCount = 0;
+            gameActive = true;
+            
+            scoreDisplay.innerText = padScore(score);
+            startScreen.classList.add('hidden');
+            gameOverScreen.classList.add('hidden');
+            
+            // Set canvas size correctly on start
+            resize(); 
+            
+            gameLoop();
+        }
+
+        function triggerGameOver() {
+            gameActive = false;
+            
+            finalScoreDisplay.innerText = padScore(score);
+            
+            drawEnvironment();
+            obstacles.forEach(obs => obs.draw());
+            player.draw(true);
+            
+            setTimeout(() => {
+                gameOverScreen.classList.remove('hidden');
+            }, 300);
+        }
+
+        function gameLoop() {
+            if (!gameActive) return;
+            
+            frameCount++;
+            
+            drawEnvironment();
+            
+            // Cloud management
+            for (let i = clouds.length - 1; i >= 0; i--) {
+                clouds[i].update();
+                if (clouds[i].x + 100 < 0) {
+                    clouds.splice(i, 1);
+                    clouds.push(new Cloud());
+                }
+            }
+            
+            // Spawn Obstacles (Random distance between them)
+            if (obstacles.length === 0 || 
+                (width - obstacles[obstacles.length - 1].x > (250 + Math.random() * 300))) {
+                
+                if (Math.random() > 0.7 && score > 100) { // Introduce birds after 100 score
+                    obstacles.push(new Bird());
+                } else {
+                    obstacles.push(new Cactus());
+                }
+            }
+            
+            // Increase speed and score
+            if (frameCount % 5 === 0) {
+                score++;
+                scoreDisplay.innerText = padScore(score);
+                
+                // Increase speed more aggressively
+                if (score % 100 === 0) {
+                    gameSpeed += 0.8; 
+                }
+            }
+
+            player.update();
+            player.draw();
+            
+            // Update and draw obstacles
+            for (let i = obstacles.length - 1; i >= 0; i--) {
+                let obs = obstacles[i];
+                obs.update();
+                obs.draw();
+                
+                if (checkCollision(player, obs)) {
+                    triggerGameOver();
+                    return; 
+                }
+                
+                if (obs.x + obs.width < 0) {
+                    obstacles.splice(i, 1);
+                }
+            }
+            
+            requestAnimationFrame(gameLoop);
+        }
+
+        function triggerJump(e) {
+            if (e.type === 'keydown' && e.code === 'Space') {
+                e.preventDefault();
+            }
+            
+            if (gameActive) {
+                player.jump();
+            }
+        }
+
+        window.addEventListener('keydown', (e) => {
+            if (e.code === 'Space' || e.code === 'ArrowUp') triggerJump(e);
+        });
+        window.addEventListener('mousedown', triggerJump);
+        window.addEventListener('touchstart', triggerJump, {passive: false});
+
+        startBtn.addEventListener('click', initGame);
+        restartBtn.addEventListener('click', initGame);
+
+        // Initial setup for background
+        initClouds();
+        drawEnvironment();
+        player.y = groundLevel - player.height;
+        player.draw();
+
+    </script>
+</body>
+</html>
